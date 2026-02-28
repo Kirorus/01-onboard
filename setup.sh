@@ -139,13 +139,51 @@ get_latest_tag() {
         | grep '"tag_name"' | sed 's/.*"v\?\([^"]*\)".*/\1/'
 }
 
+github_api_headers() {
+    # Extra headers for GitHub API; uses GITHUB_TOKEN if present.
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        printf '%s\n' \
+            "-H" "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "-H" "X-GitHub-Api-Version: 2022-11-28"
+    else
+        printf '%s\n' "-H" "X-GitHub-Api-Version: 2022-11-28"
+    fi
+}
+
 get_release_asset_id() {
     local repo="$1" tag="$2" asset_name="$3"
-    curl -sf "https://api.github.com/repos/${repo}/releases/tags/${tag}" \
-        | grep -F -B 4 "\"name\": \"${asset_name}\"" \
-        | grep '"id"' \
-        | head -n 1 \
-        | sed 's/[^0-9]*\([0-9][0-9]*\).*/\1/'
+    local url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
+    local body http
+    body="$(curl -sSL -w '\n%{http_code}' -H 'Accept: application/vnd.github+json' $(github_api_headers) "$url" || true)"
+    http="${body##*$'\n'}"
+    body="${body%$'\n'*}"
+
+    if [ "$http" != "200" ]; then
+        # Try to surface rate-limit / error message.
+        if echo "$body" | grep -q 'rate limit'; then
+            err "GitHub API rate limit: задайте GITHUB_TOKEN для увеличения лимита"
+        else
+            err "GitHub API error ($http) при получении assets для ${repo}@${tag}"
+        fi
+        return 1
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        echo "$body" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .id' | head -n 1
+        return 0
+    fi
+
+    # Fallback parser without jq (expects JSON with newlines).
+    echo "$body" | awk -v target="$asset_name" '
+        BEGIN { in_assets=0; cur_id="" }
+        /"assets"[[:space:]]*:[[:space:]]*\[/ { in_assets=1; next }
+        in_assets && /"id"[[:space:]]*:/ {
+            if (match($0, /"id"[[:space:]]*:[[:space:]]*([0-9]+)/, m)) cur_id=m[1]
+        }
+        in_assets && $0 ~ "\"name\"" {
+            if (index($0, "\"name\": \"" target "\"") > 0) { print cur_id; exit }
+        }
+    '
 }
 
 download_release_asset() {
@@ -155,9 +193,13 @@ download_release_asset() {
     if [ -z "${asset_id:-}" ]; then
         return 1
     fi
-    curl -fsSL -H 'Accept: application/octet-stream' \
-        "https://api.github.com/repos/${repo}/releases/assets/${asset_id}" \
-        -o "$dest"
+    local url="https://api.github.com/repos/${repo}/releases/assets/${asset_id}"
+    local http
+    http="$(curl -sSL -w '%{http_code}' -o "$dest" -H 'Accept: application/octet-stream' $(github_api_headers) "$url" || true)"
+    if [ "$http" != "200" ]; then
+        rm -f "$dest" 2>/dev/null || true
+        return 1
+    fi
 }
 
 download_url_with_github_fallback() {
