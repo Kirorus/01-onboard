@@ -139,6 +139,50 @@ get_latest_tag() {
         | grep '"tag_name"' | sed 's/.*"v\?\([^"]*\)".*/\1/'
 }
 
+get_release_asset_id() {
+    local repo="$1" tag="$2" asset_name="$3"
+    curl -sf "https://api.github.com/repos/${repo}/releases/tags/${tag}" \
+        | grep -F -B 4 "\"name\": \"${asset_name}\"" \
+        | grep '"id"' \
+        | head -n 1 \
+        | sed 's/[^0-9]*\([0-9][0-9]*\).*/\1/'
+}
+
+download_release_asset() {
+    local repo="$1" tag="$2" asset_name="$3" dest="$4"
+    local asset_id
+    asset_id="$(get_release_asset_id "$repo" "$tag" "$asset_name")"
+    if [ -z "${asset_id:-}" ]; then
+        return 1
+    fi
+    curl -fsSL -H 'Accept: application/octet-stream' \
+        "https://api.github.com/repos/${repo}/releases/assets/${asset_id}" \
+        -o "$dest"
+}
+
+download_url_with_github_fallback() {
+    local repo="$1" url="$2" dest="$3"
+
+    # Try direct download first.
+    if curl -fsSL "$url" -o "$dest"; then
+        return 0
+    fi
+
+    # Fallback: GitHub assets API (some networks return 404 on /releases/download/...).
+    if echo "$url" | grep -qE '^https://github\.com/[^/]+/[^/]+/releases/download/[^/]+/[^/]+$'; then
+        local tag asset
+        tag="${url#*releases/download/}"
+        tag="${tag%%/*}"
+        asset="${url##*/}"
+
+        if download_release_asset "$repo" "$tag" "$asset" "$dest"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 install_github_bin() {
     local name="$1" repo="$2" url_template="$3"
     if command -v "$name" >/dev/null 2>&1; then
@@ -156,7 +200,9 @@ install_github_bin() {
     tmpdir="$(mktemp -d)"
     ok "Скачиваю $name v$VER..."
     if echo "$RESOLVED_URL" | grep -qE '\.tar\.gz$|\.tgz$'; then
-        curl -fsSL "$RESOLVED_URL" -o "$tmpdir/archive.tar.gz"
+        if ! download_url_with_github_fallback "$repo" "$RESOLVED_URL" "$tmpdir/archive.tar.gz"; then
+            err "Не удалось скачать $name (URL: $RESOLVED_URL)"; rm -rf "$tmpdir"; return 1
+        fi
         tar xzf "$tmpdir/archive.tar.gz" -C "$tmpdir"
         local bin_path
         bin_path="$(find "$tmpdir" -name "$name" -type f | head -1)"
@@ -165,7 +211,9 @@ install_github_bin() {
         fi
         $SUDO install -m 755 "$bin_path" "/usr/local/bin/$name"
     else
-        curl -fsSL "$RESOLVED_URL" -o "$tmpdir/$name"
+        if ! download_url_with_github_fallback "$repo" "$RESOLVED_URL" "$tmpdir/$name"; then
+            err "Не удалось скачать $name (URL: $RESOLVED_URL)"; rm -rf "$tmpdir"; return 1
+        fi
         $SUDO install -m 755 "$tmpdir/$name" "/usr/local/bin/$name"
     fi
     rm -rf "$tmpdir"
