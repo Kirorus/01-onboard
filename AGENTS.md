@@ -4,7 +4,7 @@
 
 ## Что это
 
-Интерактивный Bash-скрипт для onboarding новых серверов. TUI-меню на ANSI escape codes (без whiptail/dialog). Поддерживает Debian/Ubuntu (apt, systemd) и Alpine (apk, OpenRC).
+Интерактивный Bash-скрипт для onboarding. TUI-меню на ANSI escape codes (без whiptail/dialog). Поддерживает Debian/Ubuntu (apt, systemd), Alpine (apk, OpenRC) и macOS (brew).
 
 Запускается двумя способами:
 - **Удалённо**: `bash <(curl -fsSL ...)` — dotfiles скачиваются с GitHub
@@ -70,7 +70,7 @@ bash 01-onboard/setup.sh --dry-run
 ### Shell-код
 - `set -euo pipefail` — не убирать
 - Все переменные в кавычках: `"$VAR"`, не `$VAR`
-- Для обеих платформ: apt **и** apk, systemd **и** OpenRC
+- Для всех платформ: apt **и** apk **и** brew; systemd **и** OpenRC (на macOS без systemd/OpenRC)
 - Имена пакетов различаются: `fd-find` (apt) vs `fd` (apk), `bat` (apk) vs `bat`→`batcat` (apt)
 - `chsh` на Alpine требует пакет `shadow`
 - `getent` может отсутствовать — есть fallback через `grep /etc/passwd`

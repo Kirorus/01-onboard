@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Обзор
 
-Bootstrap-скрипт для onboarding новых серверов. Интерактивное TUI-меню для выбора компонентов, поддержка Debian/Ubuntu и Alpine.
+Bootstrap-скрипт для onboarding. Интерактивное TUI-меню для выбора компонентов, поддержка Debian/Ubuntu, Alpine и macOS.
 
 ## Запуск
 
@@ -31,7 +31,7 @@ bash -n setup.sh
 - Shell: `#!/usr/bin/env bash`, `set -euo pipefail`
 - Коммиты: conventional commits на английском (`feat:`, `fix:`, `docs:`)
 - TUI-меню: только ANSI escape codes + `read`, без внешних зависимостей (no whiptail/dialog)
-- Поддержка двух платформ: apt + systemd (Debian/Ubuntu) и apk + OpenRC (Alpine)
+- Поддержка платформ: apt + systemd (Debian/Ubuntu), apk + OpenRC (Alpine), brew (macOS)
 
 ## GitHub
 

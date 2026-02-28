@@ -45,6 +45,9 @@ skip()  { printf '  \033[1;33m[SKIP]\033[0m %s\n' "$1"; }
 err()   { printf '  \033[0;31m[ERR]\033[0m  %s\n' "$1" >&2; }
 
 # ── Environment detection ────────────────────────────────────────────────────
+UNAME_S="$(uname -s)"
+UNAME_M="$(uname -m)"
+
 if [ "$(id -u)" = "0" ]; then
     TARGET_USER="${ARG_USER:-root}"
     if command -v getent >/dev/null 2>&1; then
@@ -59,23 +62,45 @@ else
     SUDO="sudo"
 fi
 
-case "$(uname -m)" in
-    x86_64)  ARCH_MU="x86_64";  ARCH_GO="amd64"  ;;
-    aarch64) ARCH_MU="aarch64"; ARCH_GO="arm64"   ;;
-    *) err "Unsupported architecture: $(uname -m)"; exit 1 ;;
-esac
-
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-else
-    err "/etc/os-release not found"; exit 1
+if [ "$UNAME_S" = "Darwin" ] && [ "$(id -u)" = "0" ]; then
+    err "macOS: не запускайте скрипт от root (запустите под обычным пользователем)"
+    exit 1
 fi
 
-case "$ID" in
-    debian|ubuntu) PKG="apt" ;;
-    alpine)        PKG="apk" ;;
-    *) err "Unsupported distro: $ID"; exit 1 ;;
+case "$UNAME_M" in
+    x86_64)         ARCH_MU="x86_64";  ARCH_GO="amd64" ;;
+    aarch64|arm64)  ARCH_MU="aarch64"; ARCH_GO="arm64" ;;
+    *) err "Unsupported architecture: $UNAME_M"; exit 1 ;;
 esac
+
+if [ "$UNAME_S" = "Darwin" ]; then
+    ID="macos"
+    VERSION_ID="$(sw_vers -productVersion 2>/dev/null || true)"
+    PKG="brew"
+else
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+    else
+        err "/etc/os-release not found"; exit 1
+    fi
+
+    case "$ID" in
+        debian|ubuntu) PKG="apt" ;;
+        alpine)        PKG="apk" ;;
+        *) err "Unsupported distro: $ID"; exit 1 ;;
+    esac
+fi
+
+# Fix TARGET_HOME on platforms without getent/passwd entry (e.g. macOS)
+if [ -z "${TARGET_HOME:-}" ]; then
+    if [ "$UNAME_S" = "Darwin" ] && command -v dscl >/dev/null 2>&1; then
+        TARGET_HOME="$(dscl . -read "/Users/$TARGET_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+    fi
+fi
+if [ -z "${TARGET_HOME:-}" ]; then
+    err "Не удалось определить домашнюю директорию для пользователя: $TARGET_USER"
+    exit 1
+fi
 
 # ── File fetcher ─────────────────────────────────────────────────────────────
 fetch_dotfile() {
@@ -96,6 +121,16 @@ deploy_file() {
         ok "Бэкап: $bak"
     fi
     cp "$src" "$dst"
+}
+
+# ── sed inplace helper (GNU/BSD) ─────────────────────────────────────────────
+sed_inplace() {
+    local script="$1" file="$2"
+    if [ "$UNAME_S" = "Darwin" ]; then
+        sed -i '' "$script" "$file"
+    else
+        sed -i "$script" "$file"
+    fi
 }
 
 # ── GitHub helpers ───────────────────────────────────────────────────────────
@@ -350,16 +385,53 @@ select_components() {
 }
 
 # ── Package install helpers ──────────────────────────────────────────────────
+ensure_homebrew() {
+    if command -v brew >/dev/null 2>&1; then
+        return
+    fi
+
+    step "Homebrew"
+    ok "Устанавливаю Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+    if [ -x /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+
+    if ! command -v brew >/dev/null 2>&1; then
+        err "Homebrew не найден после установки"
+        exit 1
+    fi
+    ok "Homebrew установлен"
+}
+
 pkg_install() {
-    if [ "$PKG" = "apt" ]; then
+    if [ "$PKG" = "brew" ]; then
+        ensure_homebrew
+        brew install "$@"
+    elif [ "$PKG" = "apt" ]; then
         $SUDO apt-get install -y "$@"
     else
         $SUDO apk add --no-cache "$@"
     fi
 }
 
+pkg_install_cask() {
+    if [ "$PKG" != "brew" ]; then
+        err "Cask доступен только на macOS (brew)"
+        return 1
+    fi
+    ensure_homebrew
+    brew install --cask "$@"
+}
+
 pkg_update() {
-    if [ "$PKG" = "apt" ]; then
+    if [ "$PKG" = "brew" ]; then
+        ensure_homebrew
+        brew update
+    elif [ "$PKG" = "apt" ]; then
         $SUDO apt-get update -qq
     else
         $SUDO apk update -q
@@ -370,32 +442,36 @@ pkg_update() {
 install_core_cli() {
     step "Core CLI"
 
-    local pkgs="zsh curl"
-    if [ "$PKG" = "apt" ]; then
-        pkgs="$pkgs zsh-autosuggestions zsh-syntax-highlighting bat fzf ripgrep fd-find"
+    if [ "$PKG" = "brew" ]; then
+        pkg_install zsh fzf ripgrep fd bat eza zoxide starship zsh-autosuggestions zsh-syntax-highlighting
     else
-        pkgs="$pkgs zsh-autosuggestions zsh-syntax-highlighting bat fzf ripgrep fd"
-    fi
-    pkg_install $pkgs
+        local pkgs="zsh curl"
+        if [ "$PKG" = "apt" ]; then
+            pkgs="$pkgs zsh-autosuggestions zsh-syntax-highlighting bat fzf ripgrep fd-find"
+        else
+            pkgs="$pkgs zsh-autosuggestions zsh-syntax-highlighting bat fzf ripgrep fd"
+        fi
+        pkg_install $pkgs
 
-    # eza
-    install_github_bin "eza" "eza-community/eza" \
-        'https://github.com/eza-community/eza/releases/download/v${VER}/eza_${ARCH_MU}-unknown-linux-gnu.tar.gz'
+        # eza
+        install_github_bin "eza" "eza-community/eza" \
+            'https://github.com/eza-community/eza/releases/download/v${VER}/eza_${ARCH_MU}-unknown-linux-gnu.tar.gz'
 
-    # Starship
-    if command -v starship >/dev/null 2>&1; then
-        skip "starship (уже установлен)"
-    else
-        curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
-        ok "starship установлен"
-    fi
+        # Starship
+        if command -v starship >/dev/null 2>&1; then
+            skip "starship (уже установлен)"
+        else
+            curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
+            ok "starship установлен"
+        fi
 
-    # zoxide
-    if command -v zoxide >/dev/null 2>&1; then
-        skip "zoxide (уже установлен)"
-    else
-        curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
-        ok "zoxide установлен"
+        # zoxide
+        if command -v zoxide >/dev/null 2>&1; then
+            skip "zoxide (уже установлен)"
+        else
+            curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+            ok "zoxide установлен"
+        fi
     fi
 
     # Deploy configs
@@ -418,7 +494,7 @@ install_core_cli() {
     ok "starship.toml → $TARGET_HOME/.config/starship.toml"
 
     # Apply chosen color
-    sed -i "s/segment0 = \"#[0-9a-fA-F]*\"/segment0 = \"$CHOSEN_COLOR\"/" \
+    sed_inplace "s/segment0 = \"#[0-9a-fA-F]*\"/segment0 = \"$CHOSEN_COLOR\"/" \
         "$TARGET_HOME/.config/starship.toml"
     ok "Цвет Starship: $CHOSEN_COLOR"
 
@@ -435,32 +511,44 @@ install_core_cli() {
         pkg_install shadow
     fi
     local zsh_path
-    zsh_path="$(which zsh)"
-    if [ "$(grep "^${TARGET_USER}:" /etc/passwd | cut -d: -f7)" != "$zsh_path" ]; then
-        chsh -s "$zsh_path" "$TARGET_USER" 2>/dev/null || $SUDO chsh -s "$zsh_path" "$TARGET_USER"
-        ok "Shell → $zsh_path для $TARGET_USER"
-    else
-        skip "Shell уже zsh"
+    zsh_path="$(command -v zsh)"
+    if [ -n "$zsh_path" ] && command -v chsh >/dev/null 2>&1; then
+        # On macOS users may not exist in /etc/passwd; just try chsh.
+        if [ "$UNAME_S" = "Darwin" ]; then
+            chsh -s "$zsh_path" "$TARGET_USER" 2>/dev/null || true
+            ok "Shell → $zsh_path для $TARGET_USER"
+        else
+            if [ "$(grep "^${TARGET_USER}:" /etc/passwd | cut -d: -f7)" != "$zsh_path" ]; then
+                chsh -s "$zsh_path" "$TARGET_USER" 2>/dev/null || $SUDO chsh -s "$zsh_path" "$TARGET_USER"
+                ok "Shell → $zsh_path для $TARGET_USER"
+            else
+                skip "Shell уже zsh"
+            fi
+        fi
     fi
 }
 
 install_system_utils() {
     step "System Utils"
 
-    local pkgs="btop ncdu jq mc nano"
-    pkg_install $pkgs
+    if [ "$PKG" = "brew" ]; then
+        pkg_install btop ncdu jq yq mc nano duf git-delta
+    else
+        local pkgs="btop ncdu jq mc nano"
+        pkg_install $pkgs
 
-    # duf
-    install_github_bin "duf" "muesli/duf" \
-        'https://github.com/muesli/duf/releases/download/v${VER}/duf_${VER}_linux_${ARCH_GO}.tar.gz'
+        # duf
+        install_github_bin "duf" "muesli/duf" \
+            'https://github.com/muesli/duf/releases/download/v${VER}/duf_${VER}_linux_${ARCH_GO}.tar.gz'
 
-    # delta
-    install_github_bin "delta" "dandavison/delta" \
-        'https://github.com/dandavison/delta/releases/download/${VER}/delta-${VER}-${ARCH_MU}-unknown-linux-gnu.tar.gz'
+        # delta
+        install_github_bin "delta" "dandavison/delta" \
+            'https://github.com/dandavison/delta/releases/download/${VER}/delta-${VER}-${ARCH_MU}-unknown-linux-gnu.tar.gz'
 
-    # yq
-    install_github_bin "yq" "mikefarah/yq" \
-        'https://github.com/mikefarah/yq/releases/download/v${VER}/yq_linux_${ARCH_GO}'
+        # yq
+        install_github_bin "yq" "mikefarah/yq" \
+            'https://github.com/mikefarah/yq/releases/download/v${VER}/yq_linux_${ARCH_GO}'
+    fi
 }
 
 install_multiplexer() {
@@ -470,16 +558,26 @@ install_multiplexer() {
         pkg_install tmux
         ok "tmux установлен"
     else
-        install_github_bin "zellij" "zellij-org/zellij" \
-            'https://github.com/zellij-org/zellij/releases/download/v${VER}/zellij-${ARCH_MU}-unknown-linux-musl.tar.gz'
+        if [ "$PKG" = "brew" ]; then
+            pkg_install zellij
+            ok "zellij установлен"
+        else
+            install_github_bin "zellij" "zellij-org/zellij" \
+                'https://github.com/zellij-org/zellij/releases/download/v${VER}/zellij-${ARCH_MU}-unknown-linux-musl.tar.gz'
+        fi
     fi
 }
 
 install_git_tools() {
     step "Git Tools"
 
-    install_github_bin "lazygit" "jesseduffield/lazygit" \
-        'https://github.com/jesseduffield/lazygit/releases/download/v${VER}/lazygit_${VER}_Linux_${ARCH_MU}.tar.gz'
+    if [ "$PKG" = "brew" ]; then
+        pkg_install lazygit
+        ok "lazygit установлен"
+    else
+        install_github_bin "lazygit" "jesseduffield/lazygit" \
+            'https://github.com/jesseduffield/lazygit/releases/download/v${VER}/lazygit_${VER}_Linux_${ARCH_MU}.tar.gz'
+    fi
 }
 
 install_docker() {
@@ -490,7 +588,13 @@ install_docker() {
         return
     fi
 
-    if [ "$PKG" = "apt" ]; then
+    if [ "$PKG" = "brew" ]; then
+        pkg_install_cask docker
+        ok "Docker Desktop установлен"
+        printf '\n  Запустите Docker Desktop: Applications → Docker\n'
+        printf '  После старта проверьте: docker version\n\n'
+        return
+    elif [ "$PKG" = "apt" ]; then
         curl -fsSL https://get.docker.com | sh
         $SUDO systemctl enable --now docker
     else
@@ -532,7 +636,9 @@ install_tailscale() {
     if command -v tailscale >/dev/null 2>&1; then
         skip "Tailscale (уже установлен)"
     else
-        if [ "$PKG" = "apt" ]; then
+        if [ "$PKG" = "brew" ]; then
+            pkg_install_cask tailscale
+        elif [ "$PKG" = "apt" ]; then
             curl -fsSL https://tailscale.com/install.sh | sh
         else
             $SUDO apk add tailscale
@@ -542,11 +648,22 @@ install_tailscale() {
         ok "Tailscale установлен"
     fi
 
+    if [ "$PKG" = "brew" ]; then
+        # Try to start the app so CLI can talk to daemon
+        if command -v open >/dev/null 2>&1; then
+            open -a Tailscale >/dev/null 2>&1 || true
+        fi
+    fi
+
     echo ""
     echo "  Подключение к Headscale (ts.kiroru.ru)..."
     echo "  После выполнения команды откройте URL для авторизации."
     echo ""
-    $SUDO tailscale up --login-server https://ts.kiroru.ru
+    if ! $SUDO tailscale up --login-server https://ts.kiroru.ru; then
+        err "tailscale up не удалось (возможно, нужно запустить Tailscale.app и выдать разрешения)"
+        printf '  Повторите вручную: tailscale up --login-server https://ts.kiroru.ru\n'
+        return
+    fi
     echo ""
     printf '  Нажмите ENTER после авторизации в Headscale... '
     read -r
@@ -556,7 +673,11 @@ install_code_server() {
     step "code-server"
 
     if ! command -v code-server >/dev/null 2>&1; then
-        curl -fsSL https://code-server.dev/install.sh | sh
+        if [ "$PKG" = "brew" ]; then
+            pkg_install code-server
+        else
+            curl -fsSL https://code-server.dev/install.sh | sh
+        fi
         ok "code-server установлен"
     else
         skip "code-server (уже установлен)"
@@ -575,7 +696,7 @@ cert: false
 CSEOF
     else
         # Update bind-addr to 0.0.0.0
-        sed -i 's/^bind-addr:.*/bind-addr: 0.0.0.0:8080/' "$cs_config"
+        sed_inplace 's/^bind-addr:.*/bind-addr: 0.0.0.0:8080/' "$cs_config"
         CS_PASSWORD="$(grep '^password:' "$cs_config" | awk '{print $2}')"
     fi
 
@@ -585,6 +706,9 @@ CSEOF
 
     if [ "$PKG" = "apt" ]; then
         $SUDO systemctl enable --now "code-server@${TARGET_USER}"
+    elif [ "$PKG" = "brew" ]; then
+        printf '\n  На macOS сервис не настраиваю автоматически.\n'
+        printf '  Запуск: code-server --config "%s"\n\n' "$cs_config"
     fi
     ok "code-server слушает на 0.0.0.0:8080"
 }

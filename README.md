@@ -6,6 +6,7 @@
 ![Debian](https://img.shields.io/badge/Debian-A81D33?style=flat&logo=debian&logoColor=white)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat&logo=ubuntu&logoColor=white)
 ![Alpine](https://img.shields.io/badge/Alpine-0D597F?style=flat&logo=alpine-linux&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)
 
 ## Установка
 
@@ -106,6 +107,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Kirorus/01-onboard/main/setu
 
 Docker Engine + Docker Compose. На Debian/Ubuntu через [get.docker.com](https://get.docker.com), на Alpine через `apk`.
 
+На macOS устанавливается Docker Desktop (через Homebrew Cask).
+
 ### Dockge (опционально)
 
 [Dockge](https://github.com/louislam/dockge) — веб-UI для управления Docker Compose стеками. Требует Docker. Запускается на порту `5001`.
@@ -134,6 +137,7 @@ bash setup.sh [OPTIONS]
 |-|-------------------|-------------|-------------|
 | Debian / Ubuntu | apt | systemd | x86_64, aarch64 |
 | Alpine | apk | OpenRC | x86_64, aarch64 |
+| macOS | brew | launchd (без авто-настройки) | x86_64, arm64 |
 
 ## Структура
 

@@ -23,11 +23,20 @@ compinit
 zstyle ':completion:*' menu select
 
 # Plugins
+BREW_PREFIX=""
+if command -v brew >/dev/null 2>&1; then
+    BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+fi
+
 if [ -f "/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
     source "/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
+elif [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
+    source "$BREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
 fi
 if [ -f "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
     source "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+elif [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
+    source "$BREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 fi
 
 # Tool integrations
@@ -36,9 +45,13 @@ if [ -t 1 ] && command -v zoxide >/dev/null 2>&1; then
 fi
 if [ -t 1 ] && [ "$TERM" != "dumb" ] && [ -f "/usr/share/doc/fzf/examples/key-bindings.zsh" ]; then
     source "/usr/share/doc/fzf/examples/key-bindings.zsh"
+elif [ -t 1 ] && [ "$TERM" != "dumb" ] && [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/opt/fzf/shell/key-bindings.zsh" ]; then
+    source "$BREW_PREFIX/opt/fzf/shell/key-bindings.zsh"
 fi
 if [ -t 1 ] && [ "$TERM" != "dumb" ] && [ -f "/usr/share/doc/fzf/examples/completion.zsh" ]; then
     source "/usr/share/doc/fzf/examples/completion.zsh"
+elif [ -t 1 ] && [ "$TERM" != "dumb" ] && [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/opt/fzf/shell/completion.zsh" ]; then
+    source "$BREW_PREFIX/opt/fzf/shell/completion.zsh"
 fi
 
 # Aliases
@@ -48,9 +61,15 @@ if command -v eza >/dev/null 2>&1; then
     alias la='eza -a --group-directories-first --icons=auto'
     alias lt='eza --tree --level=2 --icons=auto'
 else
-    alias ls='ls --color=auto'
-    alias ll='ls -lah --color=auto'
-    alias la='ls -A --color=auto'
+    if [ "$(uname -s)" = "Darwin" ]; then
+        alias ls='ls -G'
+        alias ll='ls -lahG'
+        alias la='ls -AG'
+    else
+        alias ls='ls --color=auto'
+        alias ll='ls -lah --color=auto'
+        alias la='ls -A --color=auto'
+    fi
 fi
 
 if command -v bat >/dev/null 2>&1; then
@@ -59,8 +78,12 @@ elif command -v batcat >/dev/null 2>&1; then
     alias cat='batcat --style=plain --paging=never'
 fi
 
-alias grep='grep --color=auto'
-alias diff='diff --color=auto'
+if command grep --help 2>&1 | command grep -q -- '--color'; then
+    alias grep='grep --color=auto'
+fi
+if command diff --help 2>&1 | command grep -q -- '--color'; then
+    alias diff='diff --color=auto'
+fi
 if command -v fdfind >/dev/null 2>&1; then
     alias fd='fdfind'
 fi
