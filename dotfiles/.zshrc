@@ -56,6 +56,9 @@ fi
 
 # Aliases
 if command -v eza >/dev/null 2>&1; then
+    # eza colors (Catppuccin-ish, readable). Can be overridden via $EZA_COLORS.
+    : "${EZA_COLORS:=di=38;5;110:ln=38;5;73:ex=38;5;114:pi=38;5;215:so=38;5;203:bd=38;5;215;1:cd=38;5;214;1:da=38;5;245:tm=38;5;245:uu=38;5;180:un=38;5;180:gu=38;5;150:gn=38;5;150}"
+    export EZA_COLORS
     alias ls='eza --group-directories-first --icons=auto'
     alias ll='eza -lah --group-directories-first --git --icons=auto'
     alias la='eza -a --group-directories-first --icons=auto'
