@@ -68,8 +68,16 @@ if [ "$UNAME_S" = "Darwin" ] && [ "$(id -u)" = "0" ]; then
 fi
 
 case "$UNAME_M" in
-    x86_64)         ARCH_MU="x86_64";  ARCH_GO="amd64" ;;
-    aarch64|arm64)  ARCH_MU="aarch64"; ARCH_GO="arm64" ;;
+    x86_64)
+        ARCH_MU="x86_64"
+        ARCH_GO="amd64"
+        ARCH_DUF="x86_64"
+        ;;
+    aarch64|arm64)
+        ARCH_MU="aarch64"
+        ARCH_GO="arm64"
+        ARCH_DUF="arm64"
+        ;;
     *) err "Unsupported architecture: $UNAME_M"; exit 1 ;;
 esac
 
@@ -629,7 +637,7 @@ install_system_utils() {
 
         # duf
         install_github_bin "duf" "muesli/duf" \
-            'https://github.com/muesli/duf/releases/download/v${VER}/duf_${VER}_linux_${ARCH_GO}.tar.gz'
+            'https://github.com/muesli/duf/releases/download/v${VER}/duf_${VER}_linux_${ARCH_DUF}.tar.gz'
 
         # delta
         install_github_bin "delta" "dandavison/delta" \
