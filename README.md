@@ -31,7 +31,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Kirorus/01-onboard/main/setu
 
   ▶ [x] Core CLI        zsh + starship, eza, bat, fzf, ripgrep, fd, zoxide
     [x] System Utils    btop, ncdu, duf, delta, jq, yq, mc, nano
-    [x] Multiplexer     ● tmux  ○ zellij
+    [x] Multiplexer     ○ tmux  ● zellij
     [x] Git Tools       lazygit
     [ ] Docker          Docker Engine + Docker Compose
     [ ] Dockge          Docker Compose UI (требует Docker)

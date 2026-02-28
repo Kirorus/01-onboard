@@ -399,7 +399,7 @@ COMP_DESC=(
     "показать план без установки"
 )
 COMP_SELECTED=(1 1 1 1 0 0 0 0 0)  # defaults
-MUX_CHOICE=0  # 0=tmux, 1=zellij
+MUX_CHOICE=1  # 0=tmux, 1=zellij
 
 select_components() {
     local selected=0
